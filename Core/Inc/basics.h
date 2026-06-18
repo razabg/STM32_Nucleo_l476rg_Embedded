@@ -7,7 +7,7 @@ void turn_red_light_with_button(void);
 void turn_red_light_with_button_reg(void);
 void basic_uart_receive_message(void);
 void basic_uart_turn_lights_by_message_from_console(void);
-
+void dma_task(void);
 
 
 #endif

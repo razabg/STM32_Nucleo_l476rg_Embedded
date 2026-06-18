@@ -76,6 +76,8 @@ void Error_Handler(void);
 #define but1_Pin GPIO_PIN_3
 #define but1_GPIO_Port GPIOB
 #define but1_EXTI_IRQn EXTI3_IRQn
+#define DHT_Pin GPIO_PIN_5
+#define DHT_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
