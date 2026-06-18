@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include "basics.h"
 #include "../shared/uart_queue.h"
+#include "../shared/dht.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/

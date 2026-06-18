@@ -11,6 +11,9 @@
 #define BUT1_PIN     (1U << 3) //but1 == pin3
 #define RED_LED_PIN  (1U << 6) //pin 6
 
+extern UART_HandleTypeDef huart2; //ALREADY IN MAIN C LINE 45
+
+
 /* * FUNCTION: __io_putchar
  * PURPOSE: Low-level UART character transmission.
  * DETAILS: Sends a single byte over UART2 using HAL polling.
