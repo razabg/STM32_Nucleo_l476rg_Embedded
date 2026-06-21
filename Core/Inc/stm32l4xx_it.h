@@ -59,6 +59,7 @@ void EXTI3_IRQHandler(void);
 void TIM1_UP_TIM16_IRQHandler(void);
 void USART2_IRQHandler(void);
 void TIM6_DAC_IRQHandler(void);
+void TIM7_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */

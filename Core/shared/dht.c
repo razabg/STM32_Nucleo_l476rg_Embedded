@@ -164,6 +164,7 @@ DHT_Result DHT_Read(DHT_Data *out)
 
 
 //important ! there is anther button interrupt callback in basics.c make sure its under comment to use this callback
+//take a look at dht2 that is being built in a better way in terms of ADT
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if (GPIO_Pin == but1_Pin)
