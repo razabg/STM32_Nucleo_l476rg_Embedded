@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -51,8 +52,38 @@ TIM_HandleTypeDef htim16;
 UART_HandleTypeDef huart2;
 
 DMA_HandleTypeDef hdma_memtomem_dma1_channel1;
-/* USER CODE BEGIN PV */
+/* Definitions for defaultTask */
+osThreadId_t defaultTaskHandle;
+const osThreadAttr_t defaultTask_attributes = {
+  .name = "defaultTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for t_red_led300 */
+osThreadId_t t_red_led300Handle;
+const osThreadAttr_t t_red_led300_attributes = {
+  .name = "t_red_led300",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
 
+};
+/* Definitions for t_blue_led500 */
+osThreadId_t t_blue_led500Handle;
+const osThreadAttr_t t_blue_led500_attributes = {
+  .name = "t_blue_led500",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+/* Definitions for printLedCount */
+osThreadId_t printLedCountHandle;
+const osThreadAttr_t printLedCount_attributes = {
+  .name = "printLedCount",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+/* USER CODE BEGIN PV */
+static int counterRed = 0;
+static int counterBlue = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -64,13 +95,28 @@ static void MX_TIM6_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM7_Init(void);
+void StartDefaultTask(void *argument);
+void StartTask02(void *argument);
+void StartTask03(void *argument);
+void StartTask04(void *argument);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+typedef struct Led_Task
+{
+int color; // 0 is red 1 is blue
+GPIO_TypeDef * port;
+uint16_t pin;
+uint32_t delay;
+}
+Led_Task;
 
+Led_Task blue_task = {1,BLUE_LED_GPIO_Port, BLUE_LED_Pin, 500};
+Led_Task red_task = {0,RED_LED_GPIO_Port, RED_LED_Pin, 300};
 
 /* USER CODE END 0 */
 
@@ -135,6 +181,52 @@ int main(void)
 //
 //  printf("Hello World\r\n");
   /* USER CODE END 2 */
+
+  /* Init scheduler */
+  osKernelInitialize();
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of defaultTask */
+  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+
+  /* creation of t_red_led300 */
+  t_red_led300Handle = osThreadNew(StartTask02,&red_task, &t_red_led300_attributes);
+
+  /* creation of t_blue_led500 */
+
+  t_blue_led500Handle = osThreadNew(StartTask02,&blue_task, &t_blue_led500_attributes);
+
+  /* creation of printLedCount */
+  printLedCountHandle = osThreadNew(StartTask04, NULL, &printLedCount_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -478,7 +570,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(DHT_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI3_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -489,6 +581,91 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void *argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_StartTask02 */
+/**
+* @brief Function implementing the t_red_led300 thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartTask02 */
+void StartTask02(void *argument)
+{
+  /* USER CODE BEGIN StartTask02 */
+	Led_Task *task = (Led_Task *)argument;
+  /* Infinite loop */
+  for(;;)
+  {
+	if(task->color == 0){
+		counterRed++;
+	}
+	else {
+		counterBlue++;
+	}
+	HAL_GPIO_TogglePin(task->port,task->pin);
+    osDelay(task->delay);
+  }
+  /* USER CODE END StartTask02 */
+}
+
+/* USER CODE BEGIN Header_StartTask03 */
+/**
+* @brief Function implementing the t_blue_led500 thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartTask03 */
+
+void StartTask03(void *argument)
+{
+  /* USER CODE BEGIN StartTask03 */
+  /* Infinite loop */
+  for(;;)
+  {
+	counterBlue++;
+	HAL_GPIO_TogglePin(BLUE_LED_GPIO_Port,BLUE_LED_Pin);
+	osDelay(500);
+
+  }
+  /* USER CODE END StartTask03 */
+}
+
+/* USER CODE BEGIN Header_StartTask04 */
+/**
+* @brief Function implementing the printLedCount thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartTask04 */
+void StartTask04(void *argument)
+{
+  /* USER CODE BEGIN StartTask04 */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(3000);
+    printf("red :%d  blue :%d\r\n",counterRed,counterBlue);
+  }
+  /* USER CODE END StartTask04 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
