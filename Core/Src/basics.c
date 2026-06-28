@@ -40,6 +40,9 @@ int _write(int file, char *ptr, int len)
     return len;
 }
 
+
+
+
 /* * FUNCTION: turn_red_light_with_button_reg
  * PURPOSE: Direct register-level GPIO control (No HAL).
  * DETAILS: Configures PA6 as output and PB3 as input via MODER registers.

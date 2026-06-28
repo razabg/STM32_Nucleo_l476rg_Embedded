@@ -24,13 +24,17 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "basics.h"
-#include "../shared/uart_queue.h"
+//#include "../shared/uart_queue.h"
 #include "../shared/dht.h"
+//#include "../shared/TimerTasks.h"
+//#include "../shared/msgQueueEx.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-extern Queue * queue;
+//extern Queue * queue;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -45,13 +49,9 @@ extern Queue * queue;
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim2;
-TIM_HandleTypeDef htim6;
-TIM_HandleTypeDef htim7;
-TIM_HandleTypeDef htim16;
 
 UART_HandleTypeDef huart2;
 
-DMA_HandleTypeDef hdma_memtomem_dma1_channel1;
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
@@ -59,64 +59,68 @@ const osThreadAttr_t defaultTask_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for t_red_led300 */
-osThreadId_t t_red_led300Handle;
-const osThreadAttr_t t_red_led300_attributes = {
-  .name = "t_red_led300",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
-
-};
-/* Definitions for t_blue_led500 */
-osThreadId_t t_blue_led500Handle;
-const osThreadAttr_t t_blue_led500_attributes = {
-  .name = "t_blue_led500",
+/* Definitions for OddNum */
+osThreadId_t OddNumHandle;
+const osThreadAttr_t OddNum_attributes = {
+  .name = "OddNum",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
-/* Definitions for printLedCount */
-osThreadId_t printLedCountHandle;
-const osThreadAttr_t printLedCount_attributes = {
-  .name = "printLedCount",
+/* Definitions for EvenNum */
+osThreadId_t EvenNumHandle;
+const osThreadAttr_t EvenNum_attributes = {
+  .name = "EvenNum",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
+};
+/* Definitions for OddSem */
+osSemaphoreId_t OddSemHandle;
+const osSemaphoreAttr_t OddSem_attributes = {
+  .name = "OddSem"
+};
+/* Definitions for EvenSem */
+osSemaphoreId_t EvenSemHandle;
+const osSemaphoreAttr_t EvenSem_attributes = {
+  .name = "EvenSem"
 };
 /* USER CODE BEGIN PV */
-static int counterRed = 0;
-static int counterBlue = 0;
+
+
+
+
+
+//static int counterRed = 0;
+//static int counterBlue = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_TIM6_Init(void);
-static void MX_TIM16_Init(void);
 static void MX_TIM2_Init(void);
-static void MX_TIM7_Init(void);
 void StartDefaultTask(void *argument);
-void StartTask02(void *argument);
-void StartTask03(void *argument);
-void StartTask04(void *argument);
+void OddNum1(void *argument);
+void EvenNum2(void *argument);
 
 /* USER CODE BEGIN PFP */
+//void Periodic_LedToggle_Callback(void *argument);
+//void Periodic_PrintCounters_Callback(void *argument);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-typedef struct Led_Task
-{
-int color; // 0 is red 1 is blue
-GPIO_TypeDef * port;
-uint16_t pin;
-uint32_t delay;
-}
-Led_Task;
-
-Led_Task blue_task = {1,BLUE_LED_GPIO_Port, BLUE_LED_Pin, 500};
-Led_Task red_task = {0,RED_LED_GPIO_Port, RED_LED_Pin, 300};
+//typedef struct Led_Task
+//{
+//int color; // 0 is red 1 is blue
+//GPIO_TypeDef * port;
+//uint16_t pin;
+//uint32_t delay;
+//}
+//Led_Task;
+//
+//Led_Task blue_task = {1,BLUE_LED_GPIO_Port, BLUE_LED_Pin, 500};
+//Led_Task red_task = {0,RED_LED_GPIO_Port, RED_LED_Pin, 300};
 
 /* USER CODE END 0 */
 
@@ -149,19 +153,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
   MX_USART2_UART_Init();
-  MX_TIM6_Init();
-  MX_TIM16_Init();
   MX_TIM2_Init();
-  MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
 //  HAL_TIM_Base_Start_IT(&htim6);    // start TIM6 with interrupts
-//  HAL_TIM_Base_Start_IT(&htim16);   // start TIM16 with interrupts
+  //HAL_TIM_Base_Start_IT(&htim7);   // start TIM16 with interrupts
   HAL_TIM_Base_Start(&htim2);
 
   //dma_task();
-
 
 //    char *data1 = "hello from 1\r\n";
 //    char *data2 = "hello from 2\r\n";
@@ -189,6 +188,13 @@ int main(void)
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
+  /* Create the semaphores(s) */
+  /* creation of OddSem */
+//  OddSemHandle = osSemaphoreNew(1, 1, &OddSem_attributes);
+//
+//  /* creation of EvenSem */
+//  EvenSemHandle = osSemaphoreNew(1, 0, &EvenSem_attributes);
+
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
@@ -199,24 +205,24 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+  // The queue can hold a maximum of 5 values of size int16_t.
+
+
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
   /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
-
-  /* creation of t_red_led300 */
-  t_red_led300Handle = osThreadNew(StartTask02,&red_task, &t_red_led300_attributes);
-
-  /* creation of t_blue_led500 */
-
-  t_blue_led500Handle = osThreadNew(StartTask02,&blue_task, &t_blue_led500_attributes);
-
-  /* creation of printLedCount */
-  printLedCountHandle = osThreadNew(StartTask04, NULL, &printLedCount_attributes);
+//  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+//
+//  /* creation of OddNum */
+//  OddNumHandle = osThreadNew(OddNum1, NULL, &OddNum_attributes);
+//
+//  /* creation of EvenNum */
+//  EvenNumHandle = osThreadNew(EvenNum2, NULL, &EvenNum_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -302,14 +308,14 @@ static void MX_TIM2_Init(void)
 {
 
   /* USER CODE BEGIN TIM2_Init 0 */
-
+//
   /* USER CODE END TIM2_Init 0 */
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
   /* USER CODE BEGIN TIM2_Init 1 */
-
+//
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 79;
@@ -333,116 +339,8 @@ static void MX_TIM2_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM2_Init 2 */
-
+//
   /* USER CODE END TIM2_Init 2 */
-
-}
-
-/**
-  * @brief TIM6 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM6_Init(void)
-{
-
-  /* USER CODE BEGIN TIM6_Init 0 */
-
-  /* USER CODE END TIM6_Init 0 */
-
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM6_Init 1 */
-
-  /* USER CODE END TIM6_Init 1 */
-  htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 7999;
-  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 999;
-  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM6_Init 2 */
-
-  /* USER CODE END TIM6_Init 2 */
-
-}
-
-/**
-  * @brief TIM7 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM7_Init(void)
-{
-
-  /* USER CODE BEGIN TIM7_Init 0 */
-
-  /* USER CODE END TIM7_Init 0 */
-
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM7_Init 1 */
-
-  /* USER CODE END TIM7_Init 1 */
-  htim7.Instance = TIM7;
-  htim7.Init.Prescaler = 7999;
-  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim7.Init.Period = 99;
-  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim7, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM7_Init 2 */
-
-  /* USER CODE END TIM7_Init 2 */
-
-}
-
-/**
-  * @brief TIM16 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM16_Init(void)
-{
-
-  /* USER CODE BEGIN TIM16_Init 0 */
-
-  /* USER CODE END TIM16_Init 0 */
-
-  /* USER CODE BEGIN TIM16_Init 1 */
-
-  /* USER CODE END TIM16_Init 1 */
-  htim16.Instance = TIM16;
-  htim16.Init.Prescaler = 7999;
-  htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim16.Init.Period = 9999;
-  htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim16.Init.RepetitionCounter = 0;
-  htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim16) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM16_Init 2 */
-
-  /* USER CODE END TIM16_Init 2 */
 
 }
 
@@ -478,34 +376,6 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
-
-}
-
-/**
-  * Enable DMA controller clock
-  * Configure DMA for memory to memory transfers
-  *   hdma_memtomem_dma1_channel1
-  */
-static void MX_DMA_Init(void)
-{
-
-  /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
-
-  /* Configure DMA request hdma_memtomem_dma1_channel1 on DMA1_Channel1 */
-  hdma_memtomem_dma1_channel1.Instance = DMA1_Channel1;
-  hdma_memtomem_dma1_channel1.Init.Request = DMA_REQUEST_0;
-  hdma_memtomem_dma1_channel1.Init.Direction = DMA_MEMORY_TO_MEMORY;
-  hdma_memtomem_dma1_channel1.Init.PeriphInc = DMA_PINC_ENABLE;
-  hdma_memtomem_dma1_channel1.Init.MemInc = DMA_MINC_ENABLE;
-  hdma_memtomem_dma1_channel1.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
-  hdma_memtomem_dma1_channel1.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
-  hdma_memtomem_dma1_channel1.Init.Mode = DMA_NORMAL;
-  hdma_memtomem_dma1_channel1.Init.Priority = DMA_PRIORITY_LOW;
-  if (HAL_DMA_Init(&hdma_memtomem_dma1_channel1) != HAL_OK)
-  {
-    Error_Handler( );
-  }
 
 }
 
@@ -558,7 +428,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : but1_Pin */
   GPIO_InitStruct.Pin = but1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(but1_GPIO_Port, &GPIO_InitStruct);
 
@@ -579,6 +449,9 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+//*************************************************** this is for the timer tasks exercise
+
+
 
 /* USER CODE END 4 */
 
@@ -600,71 +473,40 @@ void StartDefaultTask(void *argument)
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_StartTask02 */
+/* USER CODE BEGIN Header_OddNum1 */
 /**
-* @brief Function implementing the t_red_led300 thread.
+* @brief Function implementing the OddNum thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_StartTask02 */
-void StartTask02(void *argument)
+/* USER CODE END Header_OddNum1 */
+void OddNum1(void *argument)
 {
-  /* USER CODE BEGIN StartTask02 */
-	Led_Task *task = (Led_Task *)argument;
+  /* USER CODE BEGIN OddNum1 */
   /* Infinite loop */
   for(;;)
   {
-	if(task->color == 0){
-		counterRed++;
-	}
-	else {
-		counterBlue++;
-	}
-	HAL_GPIO_TogglePin(task->port,task->pin);
-    osDelay(task->delay);
+    osDelay(1);
   }
-  /* USER CODE END StartTask02 */
+  /* USER CODE END OddNum1 */
 }
 
-/* USER CODE BEGIN Header_StartTask03 */
+/* USER CODE BEGIN Header_EvenNum2 */
 /**
-* @brief Function implementing the t_blue_led500 thread.
+* @brief Function implementing the EvenNum thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_StartTask03 */
-
-void StartTask03(void *argument)
+/* USER CODE END Header_EvenNum2 */
+void EvenNum2(void *argument)
 {
-  /* USER CODE BEGIN StartTask03 */
+  /* USER CODE BEGIN EvenNum2 */
   /* Infinite loop */
   for(;;)
   {
-	counterBlue++;
-	HAL_GPIO_TogglePin(BLUE_LED_GPIO_Port,BLUE_LED_Pin);
-	osDelay(500);
-
+    osDelay(1);
   }
-  /* USER CODE END StartTask03 */
-}
-
-/* USER CODE BEGIN Header_StartTask04 */
-/**
-* @brief Function implementing the printLedCount thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartTask04 */
-void StartTask04(void *argument)
-{
-  /* USER CODE BEGIN StartTask04 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(3000);
-    printf("red :%d  blue :%d\r\n",counterRed,counterBlue);
-  }
-  /* USER CODE END StartTask04 */
+  /* USER CODE END EvenNum2 */
 }
 
 /**
