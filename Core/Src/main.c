@@ -84,21 +84,22 @@ const osThreadAttr_t printTask_attributes = {
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for readDhtSemaphore */
-osSemaphoreId_t readDhtSemaphoreHandle;
-const osSemaphoreAttr_t readDhtSemaphore_attributes = {
-  .name = "readDhtSemaphore"
-};
-/* Definitions for printDataSemaphore */
-osSemaphoreId_t printDataSemaphoreHandle;
-const osSemaphoreAttr_t printDataSemaphore_attributes = {
-  .name = "printDataSemaphore"
-};
+
+
+
 /* USER CODE BEGIN PV */
 DHT_Data dht_data = {0};
 DHT_Handle *dht = NULL;
 
+osEventFlagsId_t dht_flags; //******************************** this the events flag ***********************************
 
+#define DHT_TASK  0x01   // bit 0
+#define PRINT_TASK  0x02   // bit 1
+#define FLAG_TASK3  0x04   // bit 2
+
+#define FLAG_DONE1  0x08  // delay tasks → printTask (finished)
+#define FLAG_DONE2  0x10
+#define FLAG_DONE3  0x20
 
 //static int counterRed = 0;
 //static int counterBlue = 0;
@@ -209,11 +210,6 @@ int main(void)
   /* USER CODE END RTOS_MUTEX */
 
   /* Create the semaphores(s) */
-  /* creation of readDhtSemaphore */
-  readDhtSemaphoreHandle = osSemaphoreNew(1, 1, &readDhtSemaphore_attributes);
-
-  /* creation of printDataSemaphore */
-  printDataSemaphoreHandle = osSemaphoreNew(1, 1, &printDataSemaphore_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -627,8 +623,7 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
-  /* USER CODE BEGIN 5 */
-  /* Infinite loop */
+  dht_flags = osEventFlagsNew(NULL);  // ← add this
   for(;;)
   {
     osDelay(1);
@@ -655,7 +650,7 @@ void StartDht(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	osSemaphoreAcquire(readDhtSemaphoreHandle,osWaitForever);
+	osEventFlagsWait(dht_flags, DHT_TASK,osFlagsWaitAny, osWaitForever);
 	 DHT_Result result = DHT_Read(dht, &dht_data);
 	if (result == DHT_NO_RESPONSE){
 	        printf("DHT: No response\r\n");}
@@ -664,8 +659,8 @@ void StartDht(void *argument)
 	    else
 	        {printf("DHT: Read OK\r\n");}
 
-   osSemaphoreRelease(printDataSemaphoreHandle);
-//   osDelay(10);
+   osEventFlagsSet(dht_flags, PRINT_TASK);
+
   }
   /* USER CODE END StartDht */
 }
@@ -685,7 +680,7 @@ void StartDelay(void *argument)
   {
 
     osDelay(5000);
-    osSemaphoreRelease(readDhtSemaphoreHandle);
+    osEventFlagsSet(dht_flags, DHT_TASK);
 
   }
   /* USER CODE END StartDelay */
@@ -704,7 +699,7 @@ void StartPrint(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	          osSemaphoreAcquire(printDataSemaphoreHandle, osWaitForever); // ✅ blocking
+	  	  	  osEventFlagsWait(dht_flags, PRINT_TASK,osFlagsWaitAny, osWaitForever);
 	          printf("T:%d H:%d\r\n",
 	                 dht_data.temperature_int,
 	                 dht_data.humidity_int);
