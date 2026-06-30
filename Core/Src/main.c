@@ -49,6 +49,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim6;
 TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim16;
@@ -84,14 +85,21 @@ const osThreadAttr_t printTask_attributes = {
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-
-
-
+/* Definitions for readDhtSemaphore */
+osSemaphoreId_t readDhtSemaphoreHandle;
+const osSemaphoreAttr_t readDhtSemaphore_attributes = {
+  .name = "readDhtSemaphore"
+};
+/* Definitions for printDataSemaphore */
+osSemaphoreId_t printDataSemaphoreHandle;
+const osSemaphoreAttr_t printDataSemaphore_attributes = {
+  .name = "printDataSemaphore"
+};
 /* USER CODE BEGIN PV */
 DHT_Data dht_data = {0};
 DHT_Handle *dht = NULL;
 
-osEventFlagsId_t dht_flags; //******************************** this the events flag ***********************************
+
 
 #define DHT_TASK  0x01   // bit 0
 #define PRINT_TASK  0x02   // bit 1
@@ -114,6 +122,7 @@ static void MX_TIM6_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM7_Init(void);
+static void MX_TIM3_Init(void);
 void StartDefaultTask(void *argument);
 void StartDht(void *argument);
 void StartDelay(void *argument);
@@ -176,10 +185,15 @@ int main(void)
   MX_TIM16_Init();
   MX_TIM2_Init();
   MX_TIM7_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-//  HAL_TIM_Base_Start_IT(&htim6);    // start TIM6 with interrupts
+  HAL_TIM_Base_Start_IT(&htim6);    // start TIM6 with interrupts
   //HAL_TIM_Base_Start_IT(&htim7);   // start TIM16 with interrupts
   HAL_TIM_Base_Start(&htim2);
+
+  HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_1);
+
+
 
   //dma_task();
 
@@ -197,7 +211,6 @@ int main(void)
 //  HAL_UART_Transmit(&huart2, (uint8_t *)msg, sizeof(msg)-1, HAL_MAX_DELAY);
 
 
-//  printf("Starting...\r\n");
 //
 //  printf("Hello World\r\n");
   /* USER CODE END 2 */
@@ -210,6 +223,11 @@ int main(void)
   /* USER CODE END RTOS_MUTEX */
 
   /* Create the semaphores(s) */
+  /* creation of readDhtSemaphore */
+  readDhtSemaphoreHandle = osSemaphoreNew(1, 1, &readDhtSemaphore_attributes);
+
+  /* creation of printDataSemaphore */
+  printDataSemaphoreHandle = osSemaphoreNew(1, 1, &printDataSemaphore_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -360,6 +378,55 @@ static void MX_TIM2_Init(void)
   /* USER CODE BEGIN TIM2_Init 2 */
 //
   /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 79;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 999;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 9;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
 
 }
 
@@ -553,9 +620,6 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, BLUE_LED_Pin|RED_LED_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(RGB_LED_GPIO_Port, RGB_LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
@@ -567,11 +631,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BLUE_LED_Pin RED_LED_Pin */
-  GPIO_InitStruct.Pin = BLUE_LED_Pin|RED_LED_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  /*Configure GPIO pin : PA5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : RGB_LED_Pin */
@@ -605,12 +668,27 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 //*************************************************** this is for the timer tasks exercise
+/* USER CODE BEGIN 4 */
+int duty = 9;          // start at 1%
+int direction = 1;     // 1 = increasing, -1 = decreasing
 
-void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_SET);
-    while(1);
+    if (htim->Instance == TIM6)
+    {
+        // update duty cycle
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty);
+
+        // move to next step
+        duty += direction * 10;  // 10 steps = ~1% per step
+
+        // reverse direction at limits
+        if (duty >= 989) direction = -1;  // reached 99%
+        if (duty <= 9)   direction =  1;  // reached 1%
+    }
 }
+/* USER CODE END 4 */
+
 
 /* USER CODE END 4 */
 
@@ -623,7 +701,8 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
-  dht_flags = osEventFlagsNew(NULL);  // ← add this
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
   for(;;)
   {
     osDelay(1);
@@ -650,7 +729,7 @@ void StartDht(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	osEventFlagsWait(dht_flags, DHT_TASK,osFlagsWaitAny, osWaitForever);
+	 ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 	 DHT_Result result = DHT_Read(dht, &dht_data);
 	if (result == DHT_NO_RESPONSE){
 	        printf("DHT: No response\r\n");}
@@ -658,8 +737,11 @@ void StartDht(void *argument)
 	        printf("DHT: Checksum error\r\n");}
 	    else
 	        {printf("DHT: Read OK\r\n");}
-
-   osEventFlagsSet(dht_flags, PRINT_TASK);
+	uint32_t value = ((uint32_t)dht_data.temperature_int << 24) |
+	                 ((uint32_t)dht_data.temperature_dec << 16) |
+	                 ((uint32_t)dht_data.humidity_int    <<  8) |
+	                 ((uint32_t)dht_data.humidity_dec);
+	xTaskNotify(printTaskHandle, value, eSetValueWithOverwrite);
 
   }
   /* USER CODE END StartDht */
@@ -679,8 +761,8 @@ void StartDelay(void *argument)
   for(;;)
   {
 
-    osDelay(5000);
-    osEventFlagsSet(dht_flags, DHT_TASK);
+    osDelay(2000);
+    xTaskNotifyGive(dhtTaskHandle);
 
   }
   /* USER CODE END StartDelay */
@@ -699,10 +781,15 @@ void StartPrint(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  	  	  osEventFlagsWait(dht_flags, PRINT_TASK,osFlagsWaitAny, osWaitForever);
-	          printf("T:%d H:%d\r\n",
-	                 dht_data.temperature_int,
-	                 dht_data.humidity_int);
+	  uint32_t value;
+	  xTaskNotifyWait(0, 0xFFFFFFFF, &value, portMAX_DELAY);
+
+	  uint8_t temp_int  = (value >> 24) & 0xFF;
+	  uint8_t temp_dec  = (value >> 16) & 0xFF;
+	  uint8_t humid_int = (value >>  8) & 0xFF;
+	  uint8_t humid_dec = (value)       & 0xFF;
+
+	  printf("T: %d.%d  H: %d.%d\r\n", temp_int, temp_dec, humid_int, humid_dec);
   }
   /* USER CODE END StartPrint */
 }
