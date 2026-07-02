@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdlib.h>
 #include "basics.h"
 //#include "../shared/uart_queue.h"
 #include "../shared/dht2.h"
@@ -48,6 +49,9 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc2;
+
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim6;
@@ -64,42 +68,20 @@ const osThreadAttr_t defaultTask_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for dhtTask */
-osThreadId_t dhtTaskHandle;
-const osThreadAttr_t dhtTask_attributes = {
-  .name = "dhtTask",
-  .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityHigh,
-};
-/* Definitions for delayTask */
-osThreadId_t delayTaskHandle;
-const osThreadAttr_t delayTask_attributes = {
-  .name = "delayTask",
+/* Definitions for LedDelayTask */
+osThreadId_t LedDelayTaskHandle;
+const osThreadAttr_t LedDelayTask_attributes = {
+  .name = "LedDelayTask",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for printTask */
-osThreadId_t printTaskHandle;
-const osThreadAttr_t printTask_attributes = {
-  .name = "printTask",
-  .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for readDhtSemaphore */
-osSemaphoreId_t readDhtSemaphoreHandle;
-const osSemaphoreAttr_t readDhtSemaphore_attributes = {
-  .name = "readDhtSemaphore"
-};
-/* Definitions for printDataSemaphore */
-osSemaphoreId_t printDataSemaphoreHandle;
-const osSemaphoreAttr_t printDataSemaphore_attributes = {
-  .name = "printDataSemaphore"
 };
 /* USER CODE BEGIN PV */
 DHT_Data dht_data = {0};
 DHT_Handle *dht = NULL;
 
-
+volatile uint32_t brightness_percent = 100; //********************************************************************************************************************************************************* for this task with software timers
+osTimerId_t dimmerTimerHandle;
+osTimerId_t oneShotTimerHandle;// handle also declared here — needs to be visible wherever you might stop/delete it later
 
 #define DHT_TASK  0x01   // bit 0
 #define PRINT_TASK  0x02   // bit 1
@@ -115,6 +97,7 @@ DHT_Handle *dht = NULL;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+void PeriphCommonClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
@@ -123,10 +106,12 @@ static void MX_TIM16_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM7_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_ADC1_Init(void);
+static void MX_ADC2_Init(void);
 void StartDefaultTask(void *argument);
-void StartDht(void *argument);
-void StartDelay(void *argument);
-void StartPrint(void *argument);
+void StartLedDelayTask(void *argument);
+void OneShotTimer_Callback(void *argument);
+void DimmerTimer_Callback(void *argument);
 
 /* USER CODE BEGIN PFP */
 //void Periodic_LedToggle_Callback(void *argument);
@@ -168,10 +153,15 @@ int main(void)
 
   /* USER CODE BEGIN Init */
 
+
+  /* USER CODE END 2 */
   /* USER CODE END Init */
 
   /* Configure the system clock */
   SystemClock_Config();
+
+  /* Configure the peripherals common clocks */
+  PeriphCommonClock_Config();
 
   /* USER CODE BEGIN SysInit */
 
@@ -186,13 +176,19 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM7_Init();
   MX_TIM3_Init();
+  MX_ADC1_Init();
+  MX_ADC2_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Base_Start_IT(&htim6);    // start TIM6 with interrupts
   //HAL_TIM_Base_Start_IT(&htim7);   // start TIM16 with interrupts
   HAL_TIM_Base_Start(&htim2);
 
+  //without  but using HW - TIM3 generates the actual PWM waveform on PA6 — pure hardware, zero CPU involvement, no interrupt
+  HAL_TIM_Base_Start(&htim3);
   HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_1);
 
+
+   /* USER CODE BEGIN 2 */
 
 
   //dma_task();
@@ -210,8 +206,11 @@ int main(void)
 //  char msg[] = "hello raz!\r\n";
 //  HAL_UART_Transmit(&huart2, (uint8_t *)msg, sizeof(msg)-1, HAL_MAX_DELAY);
 
+ 	  uint32_t raw_value_light;
+ 	  uint32_t duty_cycle;
+ 	  uint32_t raw_value_rotation;
 
-//
+
 //  printf("Hello World\r\n");
   /* USER CODE END 2 */
 
@@ -221,13 +220,6 @@ int main(void)
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
-
-  /* Create the semaphores(s) */
-  /* creation of readDhtSemaphore */
-  readDhtSemaphoreHandle = osSemaphoreNew(1, 1, &readDhtSemaphore_attributes);
-
-  /* creation of printDataSemaphore */
-  printDataSemaphoreHandle = osSemaphoreNew(1, 1, &printDataSemaphore_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -239,27 +231,26 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
-  // The queue can hold a maximum of 5 values of size int16_t.
 
-
+ //
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
   /* creation of defaultTask */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
-  /* creation of dhtTask */
-  dhtTaskHandle = osThreadNew(StartDht, NULL, &dhtTask_attributes);
+  /* creation of LedDelayTask */
+  LedDelayTaskHandle = osThreadNew(StartLedDelayTask, NULL, &LedDelayTask_attributes);
 
-  /* creation of delayTask */
-  delayTaskHandle = osThreadNew(StartDelay, NULL, &delayTask_attributes);
 
-  /* creation of printTask */
-  printTaskHandle = osThreadNew(StartPrint, NULL, &printTask_attributes);
+
+  dimmerTimerHandle = osTimerNew(DimmerTimer_Callback, osTimerPeriodic, NULL, NULL);
+  osTimerStart(dimmerTimerHandle, 1500);
+
+  oneShotTimerHandle = osTimerNew(OneShotTimer_Callback, osTimerOnce, NULL, NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -278,9 +269,27 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
 	 //turn_red_light_with_button();
 	  //basic_uart_turn_lights_by_message_from_console();
 
+
+
+	      // --- Read potentiometer (ADC1, 12-bit) ---
+//	      HAL_ADC_Start(&hadc1);
+//	      HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+//	      raw_value_rotation = HAL_ADC_GetValue(&hadc1);
+//	      HAL_ADC_Stop(&hadc1);
+//
+//	      // --- Read light sensor (ADC2, 8-bit) ---
+//	      HAL_ADC_Start(&hadc2);
+//	      HAL_ADC_PollForConversion(&hadc2, HAL_MAX_DELAY);
+//	      raw_value_light = HAL_ADC_GetValue(&hadc2);
+//	      HAL_ADC_Stop(&hadc2);
+//
+//	      // --- Use light sensor to control PWM duty (0-255 -> 0-999) ---
+//	      duty_cycle = (raw_value_light * 999) / 255;
+//	      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle);
 
 
   }
@@ -334,6 +343,156 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief Peripherals Common Clock Configuration
+  * @retval None
+  */
+void PeriphCommonClock_Config(void)
+{
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+
+  /** Initializes the peripherals clock
+  */
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+  PeriphClkInit.AdcClockSelection = RCC_ADCCLKSOURCE_PLLSAI1;
+  PeriphClkInit.PLLSAI1.PLLSAI1Source = RCC_PLLSOURCE_HSI;
+  PeriphClkInit.PLLSAI1.PLLSAI1M = 1;
+  PeriphClkInit.PLLSAI1.PLLSAI1N = 8;
+  PeriphClkInit.PLLSAI1.PLLSAI1P = RCC_PLLP_DIV7;
+  PeriphClkInit.PLLSAI1.PLLSAI1Q = RCC_PLLQ_DIV2;
+  PeriphClkInit.PLLSAI1.PLLSAI1R = RCC_PLLR_DIV2;
+  PeriphClkInit.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_ADC1CLK;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
+
+  /* USER CODE BEGIN ADC1_Init 0 */
+
+  /* USER CODE END ADC1_Init 0 */
+
+  ADC_MultiModeTypeDef multimode = {0};
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC1_Init 1 */
+
+  /* USER CODE END ADC1_Init 1 */
+
+  /** Common config
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc1.Init.OversamplingMode = DISABLE;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure the ADC multi-mode
+  */
+  multimode.Mode = ADC_MODE_INDEPENDENT;
+  if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_5;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset = 0;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+
+  /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief ADC2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC2_Init(void)
+{
+
+  /* USER CODE BEGIN ADC2_Init 0 */
+
+  /* USER CODE END ADC2_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC2_Init 1 */
+
+  /* USER CODE END ADC2_Init 1 */
+
+  /** Common config
+  */
+  hadc2.Instance = ADC2;
+  hadc2.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
+  hadc2.Init.Resolution = ADC_RESOLUTION_8B;
+  hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc2.Init.LowPowerAutoWait = DISABLE;
+  hadc2.Init.ContinuousConvMode = DISABLE;
+  hadc2.Init.NbrOfConversion = 1;
+  hadc2.Init.DiscontinuousConvMode = DISABLE;
+  hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc2.Init.DMAContinuousRequests = DISABLE;
+  hadc2.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc2.Init.OversamplingMode = DISABLE;
+  if (HAL_ADC_Init(&hadc2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_6;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset = 0;
+  if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC2_Init 2 */
+
+  /* USER CODE END ADC2_Init 2 */
+
 }
 
 /**
@@ -393,6 +552,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 0 */
 
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_OC_InitTypeDef sConfigOC = {0};
 
@@ -400,11 +560,20 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 79;
+  htim3.Init.Prescaler = 7;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 999;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
   if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
   {
     Error_Handler();
@@ -450,9 +619,13 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 7999;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 999;
+  htim6.Init.Period = 9999;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_OnePulse_Init(&htim6, TIM_OPMODE_SINGLE) != HAL_OK)
   {
     Error_Handler();
   }
@@ -620,6 +793,9 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(BLUE_LED_GPIO_Port, BLUE_LED_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(RGB_LED_GPIO_Port, RGB_LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
@@ -631,11 +807,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_5;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  /*Configure GPIO pin : BLUE_LED_Pin */
+  GPIO_InitStruct.Pin = BLUE_LED_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(BLUE_LED_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : RGB_LED_Pin */
   GPIO_InitStruct.Pin = RGB_LED_Pin;
@@ -668,27 +845,23 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 //*************************************************** this is for the timer tasks exercise
-/* USER CODE BEGIN 4 */
-int duty = 9;          // start at 1%
-int direction = 1;     // 1 = increasing, -1 = decreasing
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+void DimmerTimer_Callback(void *argument)
 {
-    if (htim->Instance == TIM6)
+    brightness_percent -= 10;
+    if (brightness_percent == 0)
     {
-        // update duty cycle
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty);
-
-        // move to next step
-        duty += direction * 10;  // 10 steps = ~1% per step
-
-        // reverse direction at limits
-        if (duty >= 989) direction = -1;  // reached 99%
-        if (duty <= 9)   direction =  1;  // reached 1%
+        brightness_percent = 100;
     }
+    uint32_t duty_cycle = (brightness_percent * 999) / 100;
+    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle);
 }
-/* USER CODE END 4 */
 
+
+void OneShotTimer_Callback(void *argument)
+{
+    HAL_GPIO_WritePin(BLUE_LED_GPIO_Port, BLUE_LED_Pin, GPIO_PIN_RESET);   // turn LED2 off
+}
 
 /* USER CODE END 4 */
 
@@ -710,88 +883,29 @@ void StartDefaultTask(void *argument)
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_StartDht */
+/* USER CODE BEGIN Header_StartLedDelayTask */
 /**
-* @brief Function implementing the dhtTask thread.
+* @brief Function implementing the LedDelayTask thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_StartDht */
-void StartDht(void *argument)
+/* USER CODE END Header_StartLedDelayTask */
+void StartLedDelayTask(void *argument)
 {
-  /* USER CODE BEGIN StartDht */
-	dht = DHT_Create(DHT_GPIO_Port,DHT_Pin,&htim2);
-	if (!dht) {
-		printf("dht == null");
-	}
-	DHT_Result result;
-
+  /* USER CODE BEGIN StartLedDelayTask */
   /* Infinite loop */
   for(;;)
   {
-	 ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-	 DHT_Result result = DHT_Read(dht, &dht_data);
-	if (result == DHT_NO_RESPONSE){
-	        printf("DHT: No response\r\n");}
-	    else if (result == DHT_CHECKSUM_ERROR){
-	        printf("DHT: Checksum error\r\n");}
-	    else
-	        {printf("DHT: Read OK\r\n");}
-	uint32_t value = ((uint32_t)dht_data.temperature_int << 24) |
-	                 ((uint32_t)dht_data.temperature_dec << 16) |
-	                 ((uint32_t)dht_data.humidity_int    <<  8) |
-	                 ((uint32_t)dht_data.humidity_dec);
-	xTaskNotify(printTaskHandle, value, eSetValueWithOverwrite);
+    // 1. Wait for 3 seconds
+    osDelay(3000);
 
+    // 2. Turn the 2nd LED on
+    HAL_GPIO_WritePin(BLUE_LED_GPIO_Port, BLUE_LED_Pin, GPIO_PIN_SET);
+
+    // 3. Start the 0.5s one-shot timer to turn it off
+    osTimerStart(oneShotTimerHandle, 500);
   }
-  /* USER CODE END StartDht */
-}
-
-/* USER CODE BEGIN Header_StartDelay */
-/**
-* @brief Function implementing the delayTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartDelay */
-void StartDelay(void *argument)
-{
-  /* USER CODE BEGIN StartDelay */
-  /* Infinite loop */
-  for(;;)
-  {
-
-    osDelay(2000);
-    xTaskNotifyGive(dhtTaskHandle);
-
-  }
-  /* USER CODE END StartDelay */
-}
-
-/* USER CODE BEGIN Header_StartPrint */
-/**
-* @brief Function implementing the printTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartPrint */
-void StartPrint(void *argument)
-{
-  /* USER CODE BEGIN StartPrint */
-  /* Infinite loop */
-  for(;;)
-  {
-	  uint32_t value;
-	  xTaskNotifyWait(0, 0xFFFFFFFF, &value, portMAX_DELAY);
-
-	  uint8_t temp_int  = (value >> 24) & 0xFF;
-	  uint8_t temp_dec  = (value >> 16) & 0xFF;
-	  uint8_t humid_int = (value >>  8) & 0xFF;
-	  uint8_t humid_dec = (value)       & 0xFF;
-
-	  printf("T: %d.%d  H: %d.%d\r\n", temp_int, temp_dec, humid_int, humid_dec);
-  }
-  /* USER CODE END StartPrint */
+  /* USER CODE END StartLedDelayTask */
 }
 
 /**
