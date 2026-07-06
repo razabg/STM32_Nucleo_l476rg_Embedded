@@ -18,15 +18,15 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <stdlib.h>
 #include "basics.h"
+#include "../shared/Buzzer.h"
 //#include "../shared/uart_queue.h"
-#include "../shared/dht2.h"
+//#include "../shared/dht2.h"
 //#include "../shared/TimerTasks.h"
 //#include "../shared/msgQueueEx.h"
 
@@ -61,27 +61,15 @@ TIM_HandleTypeDef htim16;
 UART_HandleTypeDef huart2;
 
 DMA_HandleTypeDef hdma_memtomem_dma1_channel1;
-/* Definitions for defaultTask */
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for LedDelayTask */
-osThreadId_t LedDelayTaskHandle;
-const osThreadAttr_t LedDelayTask_attributes = {
-  .name = "LedDelayTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
 /* USER CODE BEGIN PV */
-DHT_Data dht_data = {0};
-DHT_Handle *dht = NULL;
+//DHT_Data dht_data = {0};
+//DHT_Handle *dht = NULL;
+//
+//volatile uint32_t brightness_percent = 100; //********************************************************************************************************************************************************* for this task with software timers
+//osTimerId_t dimmerTimerHandle;
+//osTimerId_t oneShotTimerHandle;// handle also declared here — needs to be visible wherever you might stop/delete it later
 
-volatile uint32_t brightness_percent = 100; //********************************************************************************************************************************************************* for this task with software timers
-osTimerId_t dimmerTimerHandle;
-osTimerId_t oneShotTimerHandle;// handle also declared here — needs to be visible wherever you might stop/delete it later
+Buzzer_Handle *buzzer = NULL;
 
 #define DHT_TASK  0x01   // bit 0
 #define PRINT_TASK  0x02   // bit 1
@@ -90,6 +78,10 @@ osTimerId_t oneShotTimerHandle;// handle also declared here — needs to be visi
 #define FLAG_DONE1  0x08  // delay tasks → printTask (finished)
 #define FLAG_DONE2  0x10
 #define FLAG_DONE3  0x20
+
+uint8_t rx_byte;
+
+  /* USER CODE BEGIN 2 */
 
 //static int counterRed = 0;
 //static int counterBlue = 0;
@@ -108,11 +100,6 @@ static void MX_TIM7_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_ADC2_Init(void);
-void StartDefaultTask(void *argument);
-void StartLedDelayTask(void *argument);
-void OneShotTimer_Callback(void *argument);
-void DimmerTimer_Callback(void *argument);
-
 /* USER CODE BEGIN PFP */
 //void Periodic_LedToggle_Callback(void *argument);
 //void Periodic_PrintCounters_Callback(void *argument);
@@ -155,6 +142,7 @@ int main(void)
 
 
   /* USER CODE END 2 */
+  /* USER CODE END 2 */
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -179,13 +167,17 @@ int main(void)
   MX_ADC1_Init();
   MX_ADC2_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Base_Start_IT(&htim6);    // start TIM6 with interrupts
   //HAL_TIM_Base_Start_IT(&htim7);   // start TIM16 with interrupts
-  HAL_TIM_Base_Start(&htim2);
+//  HAL_TIM_Base_Start(&htim2);
+//
+//  //without  but using HW - TIM3 generates the actual PWM waveform on PA6 — pure hardware, zero CPU involvement, no interrupt
+//  HAL_TIM_Base_Start(&htim3);
+//  HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_1);
 
-  //without  but using HW - TIM3 generates the actual PWM waveform on PA6 — pure hardware, zero CPU involvement, no interrupt
-  HAL_TIM_Base_Start(&htim3);
-  HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_1);
+  HAL_TIM_Base_Start_IT(&htim6);   // duration timer (one-pulse mode)
+  buzzer = Buzzer_Create(&htim3, TIM_CHANNEL_1, &htim6);
+  Buzzer_PlayLittleYonatan(buzzer);
+  HAL_UART_Receive_IT(&huart2, &rx_byte, 1);   // start listening for 1 byte at a time
 
 
    /* USER CODE BEGIN 2 */
@@ -213,54 +205,6 @@ int main(void)
 
 //  printf("Hello World\r\n");
   /* USER CODE END 2 */
-
-  /* Init scheduler */
-  osKernelInitialize();
-
-  /* USER CODE BEGIN RTOS_MUTEX */
-  /* add mutexes, ... */
-  /* USER CODE END RTOS_MUTEX */
-
-  /* USER CODE BEGIN RTOS_SEMAPHORES */
-  /* add semaphores, ... */
-  /* USER CODE END RTOS_SEMAPHORES */
-
-  /* USER CODE BEGIN RTOS_TIMERS */
-  /* start timers, add new ones, ... */
-  /* USER CODE END RTOS_TIMERS */
-
-  /* USER CODE BEGIN RTOS_QUEUES */
-  /* add queues, ... */
-
- //
-  /* USER CODE END RTOS_QUEUES */
-
-  /* Create the thread(s) */
-  /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
-
-  /* creation of LedDelayTask */
-  LedDelayTaskHandle = osThreadNew(StartLedDelayTask, NULL, &LedDelayTask_attributes);
-
-
-
-  dimmerTimerHandle = osTimerNew(DimmerTimer_Callback, osTimerPeriodic, NULL, NULL);
-  osTimerStart(dimmerTimerHandle, 1500);
-
-  oneShotTimerHandle = osTimerNew(OneShotTimer_Callback, osTimerOnce, NULL, NULL);
-
-  /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
-  /* USER CODE END RTOS_THREADS */
-
-  /* USER CODE BEGIN RTOS_EVENTS */
-  /* add events, ... */
-  /* USER CODE END RTOS_EVENTS */
-
-  /* Start scheduler */
-  osKernelStart();
-
-  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -560,7 +504,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 7;
+  htim3.Init.Prescaler = 79;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 999;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -620,7 +564,7 @@ static void MX_TIM6_Init(void)
   htim6.Init.Prescaler = 7999;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim6.Init.Period = 9999;
-  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
     Error_Handler();
@@ -835,7 +779,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(DHT_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI3_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -846,67 +790,37 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 //*************************************************** this is for the timer tasks exercise
 
-void DimmerTimer_Callback(void *argument)
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    brightness_percent -= 10;
-    if (brightness_percent == 0)
+    if (htim->Instance == TIM6)
     {
-        brightness_percent = 100;
+        Buzzer_DurationElapsed(buzzer);
     }
-    uint32_t duty_cycle = (brightness_percent * 999) / 100;
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle);
 }
 
 
-void OneShotTimer_Callback(void *argument)
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    HAL_GPIO_WritePin(BLUE_LED_GPIO_Port, BLUE_LED_Pin, GPIO_PIN_RESET);   // turn LED2 off
-}
+    if (huart->Instance == USART2)
+    {
+        switch (rx_byte)
+        {
+            case '1': Buzzer_PlayNote(buzzer, NOTE_C1, 500); break;
+            case '2': Buzzer_PlayNote(buzzer, NOTE_D1, 500); break;
+            case '3': Buzzer_PlayNote(buzzer, NOTE_E1, 500); break;
+            case '4': Buzzer_PlayNote(buzzer, NOTE_F1, 500); break;
+            case '5': Buzzer_PlayNote(buzzer, NOTE_G1, 500); break;
+            case '6': Buzzer_PlayNote(buzzer, NOTE_A1, 500); break;
+            case '7': Buzzer_PlayNote(buzzer, NOTE_B1, 500); break;
+            case '8': Buzzer_PlayNote(buzzer, NOTE_C2, 500); break;
+            case '9': Buzzer_PlayNote(buzzer, NOTE_D2, 500); break;
+            default: break;
+        }
 
+        HAL_UART_Receive_IT(&huart2, &rx_byte, 1);  // re-arm for the NEXT byte
+    }
+}
 /* USER CODE END 4 */
-
-/* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
-{
-  /* USER CODE BEGIN 5 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartLedDelayTask */
-/**
-* @brief Function implementing the LedDelayTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartLedDelayTask */
-void StartLedDelayTask(void *argument)
-{
-  /* USER CODE BEGIN StartLedDelayTask */
-  /* Infinite loop */
-  for(;;)
-  {
-    // 1. Wait for 3 seconds
-    osDelay(3000);
-
-    // 2. Turn the 2nd LED on
-    HAL_GPIO_WritePin(BLUE_LED_GPIO_Port, BLUE_LED_Pin, GPIO_PIN_SET);
-
-    // 3. Start the 0.5s one-shot timer to turn it off
-    osTimerStart(oneShotTimerHandle, 500);
-  }
-  /* USER CODE END StartLedDelayTask */
-}
 
 /**
   * @brief  This function is executed in case of error occurrence.
