@@ -101,40 +101,7 @@ void Buzzer_PlayLittleYonatan(Buzzer_Handle *h)
 
 
 
-static const MelodyNote wellerman[] = {
-    {NOTE_A1,300},{NOTE_D1,300},{NOTE_D1,300},{NOTE_D1,300},
-    {NOTE_D1,600},{NOTE_F1,300},{NOTE_A1,300},
-    {NOTE_A1,300},{NOTE_A1,300},{NOTE_G1,300},{NOTE_F1,300},
-    {NOTE_G1,300},{NOTE_A1,600},
 
-    {NOTE_A1,300},{NOTE_D1,300},{NOTE_D1,300},{NOTE_D1,300},
-    {NOTE_D1,600},{NOTE_F1,300},{NOTE_A1,300},
-    {NOTE_A1,300},{NOTE_G1,300},{NOTE_F1,300},{NOTE_E1,300},
-    {NOTE_D1,600},
-
-    {NOTE_A1,600},{NOTE_A1,300},{NOTE_F1,300},
-    {NOTE_G1,600},{NOTE_A1,300},{NOTE_A1,300},
-    {NOTE_G1,300},{NOTE_F1,300},{NOTE_G1,300},{NOTE_A1,300},
-    {NOTE_A1,600},
-
-    {NOTE_A1,300},{NOTE_D1,300},{NOTE_D1,300},{NOTE_D1,300},
-    {NOTE_D1,600},{NOTE_F1,300},{NOTE_A1,300},
-    {NOTE_A1,300},{NOTE_G1,300},{NOTE_F1,300},{NOTE_E1,300},
-    {NOTE_D1,600},
-};
-
-
-#define WELLERMAN_LENGTH (sizeof(wellerman) / sizeof(wellerman[0]))
-
-
-void Buzzer_PlayWellerman(Buzzer_Handle *h)
-{
-    for (uint32_t i = 0; i < WELLERMAN_LENGTH; i++)
-    {
-        Buzzer_PlayNote(h, wellerman[i].note, wellerman[i].duration_ms);
-        HAL_Delay(wellerman[i].duration_ms);
-    }
-}
 //
 //put this in main
 //
