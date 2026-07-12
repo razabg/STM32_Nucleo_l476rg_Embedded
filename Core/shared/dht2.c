@@ -133,3 +133,39 @@ DHT_Result DHT_Read(DHT_Handle *h, DHT_Data *out)
 
     return DHT_OK;
 }
+
+
+////important ! there is anther button interrupt callback in basics.c make sure its under comment to use this callback
+////take a look at dht2 that is being built in a better way in terms of ADT
+//void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+//{
+//    if (GPIO_Pin == but1_Pin)
+//    {
+//        if (HAL_GPIO_ReadPin(but1_GPIO_Port, but1_Pin) == GPIO_PIN_RESET)
+//        {
+//            // Falling Edge — button pressed → read DHT
+//            DHT_Data data;
+//            DHT_Result result = DHT_Read(&data);
+//
+//            if (result == DHT_OK)
+//            {
+//                printf("Temperature: %d.%d C\r\n",
+//                       data.temperature_int,
+//                       data.temperature_dec);
+//                printf("Humidity:    %d.%d%%\r\n",
+//                       data.humidity_int,
+//                       data.humidity_dec);
+//            }
+//            else if (result == DHT_NO_RESPONSE)
+//            {
+//                printf("DHT11 not responding\r\n");
+//            }
+//            else
+//            {
+//                printf("Checksum error\r\n");
+//            }
+//        }
+//        // no need to handle release for this task
+//    }
+//}
+

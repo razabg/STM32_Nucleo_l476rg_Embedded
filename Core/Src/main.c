@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include "basics.h"
 #include "../shared/Buzzer.h"
+#include "../shared/rtc_ds1307_I2C.h"
 //#include "../shared/uart_queue.h"
 //#include "../shared/dht2.h"
 //#include "../shared/TimerTasks.h"
@@ -52,6 +53,10 @@
 ADC_HandleTypeDef hadc1;
 ADC_HandleTypeDef hadc2;
 
+I2C_HandleTypeDef hi2c3;
+
+RTC_HandleTypeDef hrtc;
+
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim6;
@@ -65,26 +70,24 @@ DMA_HandleTypeDef hdma_memtomem_dma1_channel1;
 //DHT_Data dht_data = {0};
 //DHT_Handle *dht = NULL;
 //
-//volatile uint32_t brightness_percent = 100; //********************************************************************************************************************************************************* for this task with software timers
+//volatile uint32_t brightness_percent = 100;
 //osTimerId_t dimmerTimerHandle;
-//osTimerId_t oneShotTimerHandle;// handle also declared here — needs to be visible wherever you might stop/delete it later
+//osTimerId_t oneShotTimerHandle;
 
 Buzzer_Handle *buzzer = NULL;
 
-#define DHT_TASK  0x01   // bit 0
+#define DHT_TASK    0x01   // bit 0
 #define PRINT_TASK  0x02   // bit 1
 #define FLAG_TASK3  0x04   // bit 2
 
-#define FLAG_DONE1  0x08  // delay tasks → printTask (finished)
+#define FLAG_DONE1  0x08
 #define FLAG_DONE2  0x10
 #define FLAG_DONE3  0x20
 
+#define SET_RTC_TIME    0   // set to 1 only when you want to (re)write the clock
+
 uint8_t rx_byte;
 
-  /* USER CODE BEGIN 2 */
-
-//static int counterRed = 0;
-//static int counterBlue = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -100,25 +103,15 @@ static void MX_TIM7_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_ADC2_Init(void);
+static void MX_I2C3_Init(void);
+static void MX_RTC_Init(void);
 /* USER CODE BEGIN PFP */
-//void Periodic_LedToggle_Callback(void *argument);
-//void Periodic_PrintCounters_Callback(void *argument);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-//typedef struct Led_Task
-//{
-//int color; // 0 is red 1 is blue
-//GPIO_TypeDef * port;
-//uint16_t pin;
-//uint32_t delay;
-//}
-//Led_Task;
-//
-//Led_Task blue_task = {1,BLUE_LED_GPIO_Port, BLUE_LED_Pin, 500};
-//Led_Task red_task = {0,RED_LED_GPIO_Port, RED_LED_Pin, 300};
+// call ONCE to set the clock, then comment out and reflash
 
 /* USER CODE END 0 */
 
@@ -140,9 +133,6 @@ int main(void)
 
   /* USER CODE BEGIN Init */
 
-
-  /* USER CODE END 2 */
-  /* USER CODE END 2 */
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -166,44 +156,33 @@ int main(void)
   MX_TIM3_Init();
   MX_ADC1_Init();
   MX_ADC2_Init();
+  MX_I2C3_Init();
+  MX_RTC_Init();
+
+  RTC_TimeTypeDef sTime = {0};
+  RTC_DateTypeDef sDate = {0};
+
+  sTime.Hours = 0x14;      // BCD: 14:xx
+  sTime.Minutes = 0x30;
+  sTime.Seconds = 0x00;
+  HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD);
+
+  sDate.WeekDay = RTC_WEEKDAY_THURSDAY;
+  sDate.Month = RTC_MONTH_JULY;
+  sDate.Date = 0x09;       // BCD: day 09
+  sDate.Year = 0x26;       // BCD: year 26 (2026)
+  HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD);
+
+
   /* USER CODE BEGIN 2 */
-  //HAL_TIM_Base_Start_IT(&htim7);   // start TIM16 with interrupts
-//  HAL_TIM_Base_Start(&htim2);
-//
-//  //without  but using HW - TIM3 generates the actual PWM waveform on PA6 — pure hardware, zero CPU involvement, no interrupt
-//  HAL_TIM_Base_Start(&htim3);
-//  HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_1);
-
-  HAL_TIM_Base_Start_IT(&htim6);   // duration timer (one-pulse mode)
-  buzzer = Buzzer_Create(&htim3, TIM_CHANNEL_1, &htim6);
-  Buzzer_PlayLittleYonatan(buzzer);
-  HAL_UART_Receive_IT(&huart2, &rx_byte, 1);   // start listening for 1 byte at a time
+#if SET_RTC_TIME
+  RTC_Time_t setTime = {.sec=0, .min=21, .hour=17, .dow=4, .date=8, .month=7, .year=26};
+  RTC_SetTime(&hi2c3, &setTime);
+#endif
 
 
-   /* USER CODE BEGIN 2 */
 
-
-  //dma_task();
-
-//    char *data1 = "hello from 1\r\n";
-//    char *data2 = "hello from 2\r\n";
-//    char *data3 = "hello from 3\r\n";
-//    char *data4 = "hello from 4\r\n";
-//    queue = Queue_create();
-//    uartSend(data1,14);
-//    uartSend(data2,14);
-//    uartSend(data3,14);
-//    uartSend(data4,14);
-
-//  char msg[] = "hello raz!\r\n";
-//  HAL_UART_Transmit(&huart2, (uint8_t *)msg, sizeof(msg)-1, HAL_MAX_DELAY);
-
- 	  uint32_t raw_value_light;
- 	  uint32_t duty_cycle;
- 	  uint32_t raw_value_rotation;
-
-
-//  printf("Hello World\r\n");
+uint16_t c = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -213,29 +192,46 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-	 //turn_red_light_with_button();
-	  //basic_uart_turn_lights_by_message_from_console();
-
-
-
-	      // --- Read potentiometer (ADC1, 12-bit) ---
-//	      HAL_ADC_Start(&hadc1);
-//	      HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-//	      raw_value_rotation = HAL_ADC_GetValue(&hadc1);
-//	      HAL_ADC_Stop(&hadc1);
+    // --- Your Application Code Lives Here ---
+//	  RTC_Time_t now;
+//	  if (RTC_GetTime(&hi2c3, &now) == HAL_OK)
+//	  {
+//	      printf("Time: %02u:%02u:%02u  Date: %02u/%02u/20%02u  day:%u\r\n",
+//	             now.hour, now.min, now.sec, now.date, now.month, now.year, now.dow);
+//	  }
 //
-//	      // --- Read light sensor (ADC2, 8-bit) ---
-//	      HAL_ADC_Start(&hadc2);
-//	      HAL_ADC_PollForConversion(&hadc2, HAL_MAX_DELAY);
-//	      raw_value_light = HAL_ADC_GetValue(&hadc2);
-//	      HAL_ADC_Stop(&hadc2);
-//
-//	      // --- Use light sensor to control PWM duty (0-255 -> 0-999) ---
-//	      duty_cycle = (raw_value_light * 999) / 255;
-//	      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle);
+//	  for (int i = 0; i < 10; i++)
+//	      {
+//	          HAL_Delay(100);
+////	          HAL_IWDG_Refresh(&hiwdg);
+//	      }
+//	  printf("Counter: %d\r\n", c++);
+
+	      HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BCD);
+	      HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BCD);
+
+	      printf("20%02X/%02X/%02X-%01X-%02X:%02X:%02X\r\n",
+	             sDate.Year, sDate.Month, sDate.Date, sDate.WeekDay,
+	             sTime.Hours, sTime.Minutes, sTime.Seconds);
+
+	      HAL_Delay(1000);
 
 
+    // turn_red_light_with_button();
+    // basic_uart_turn_lights_by_message_from_console();
+
+    // HAL_ADC_Start(&hadc1);
+    // HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+    // raw_value_rotation = HAL_ADC_GetValue(&hadc1);
+    // HAL_ADC_Stop(&hadc1);
+
+    // HAL_ADC_Start(&hadc2);
+    // HAL_ADC_PollForConversion(&hadc2, HAL_MAX_DELAY);
+    // raw_value_light = HAL_ADC_GetValue(&hadc2);
+    // HAL_ADC_Stop(&hadc2);
+
+    // duty_cycle = (raw_value_light * 999) / 255;
+    // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty_cycle);
   }
   /* USER CODE END 3 */
 }
@@ -259,9 +255,10 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_LSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 1;
@@ -323,14 +320,12 @@ static void MX_ADC1_Init(void)
 {
 
   /* USER CODE BEGIN ADC1_Init 0 */
-
   /* USER CODE END ADC1_Init 0 */
 
   ADC_MultiModeTypeDef multimode = {0};
   ADC_ChannelConfTypeDef sConfig = {0};
 
   /* USER CODE BEGIN ADC1_Init 1 */
-
   /* USER CODE END ADC1_Init 1 */
 
   /** Common config
@@ -376,7 +371,6 @@ static void MX_ADC1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN ADC1_Init 2 */
-
   /* USER CODE END ADC1_Init 2 */
 
 }
@@ -390,13 +384,11 @@ static void MX_ADC2_Init(void)
 {
 
   /* USER CODE BEGIN ADC2_Init 0 */
-
   /* USER CODE END ADC2_Init 0 */
 
   ADC_ChannelConfTypeDef sConfig = {0};
 
   /* USER CODE BEGIN ADC2_Init 1 */
-
   /* USER CODE END ADC2_Init 1 */
 
   /** Common config
@@ -434,8 +426,126 @@ static void MX_ADC2_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN ADC2_Init 2 */
-
   /* USER CODE END ADC2_Init 2 */
+
+}
+
+/**
+  * @brief I2C3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C3_Init(void)
+{
+
+  /* USER CODE BEGIN I2C3_Init 0 */
+
+  /* USER CODE END I2C3_Init 0 */
+
+  /* USER CODE BEGIN I2C3_Init 1 */
+
+  /* USER CODE END I2C3_Init 1 */
+  hi2c3.Instance = I2C3;
+  hi2c3.Init.Timing = 0x10D19CE4;
+  hi2c3.Init.OwnAddress1 = 0;
+  hi2c3.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c3.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c3.Init.OwnAddress2 = 0;
+  hi2c3.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c3.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c3.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c3, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c3, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C3_Init 2 */
+
+  /* USER CODE END I2C3_Init 2 */
+
+}
+
+/**
+  * @brief RTC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_RTC_Init(void)
+{
+
+  /* USER CODE BEGIN RTC_Init 0 */
+
+  /* USER CODE END RTC_Init 0 */
+
+  RTC_TimeTypeDef sTime = {0};
+  RTC_DateTypeDef sDate = {0};
+
+  /* USER CODE BEGIN RTC_Init 1 */
+
+  /* USER CODE END RTC_Init 1 */
+
+  /** Initialize RTC Only
+  */
+  hrtc.Instance = RTC;
+  hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+  hrtc.Init.AsynchPrediv = 127;
+  hrtc.Init.SynchPrediv = 255;
+  hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+  hrtc.Init.OutPutRemap = RTC_OUTPUT_REMAP_NONE;
+  hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
+  hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
+  if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /* USER CODE BEGIN Check_RTC_BKUP */
+
+  /* USER CODE END Check_RTC_BKUP */
+
+  /** Initialize RTC and set the Time and Date
+  */
+  sTime.Hours = 0x0;
+  sTime.Minutes = 0x0;
+  sTime.Seconds = 0x0;
+  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sDate.WeekDay = RTC_WEEKDAY_MONDAY;
+  sDate.Month = RTC_MONTH_JANUARY;
+  sDate.Date = 0x1;
+  sDate.Year = 0x0;
+
+  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Enable the TimeStamp
+  */
+  if (HAL_RTCEx_SetTimeStamp(&hrtc, RTC_TIMESTAMPEDGE_RISING, RTC_TIMESTAMPPIN_DEFAULT) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN RTC_Init 2 */
+
+  /* USER CODE END RTC_Init 2 */
 
 }
 
@@ -448,14 +558,12 @@ static void MX_TIM2_Init(void)
 {
 
   /* USER CODE BEGIN TIM2_Init 0 */
-//
   /* USER CODE END TIM2_Init 0 */
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
   /* USER CODE BEGIN TIM2_Init 1 */
-//
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 79;
@@ -479,7 +587,6 @@ static void MX_TIM2_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM2_Init 2 */
-//
   /* USER CODE END TIM2_Init 2 */
 
 }
@@ -493,7 +600,6 @@ static void MX_TIM3_Init(void)
 {
 
   /* USER CODE BEGIN TIM3_Init 0 */
-
   /* USER CODE END TIM3_Init 0 */
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
@@ -501,7 +607,6 @@ static void MX_TIM3_Init(void)
   TIM_OC_InitTypeDef sConfigOC = {0};
 
   /* USER CODE BEGIN TIM3_Init 1 */
-
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 79;
@@ -537,7 +642,6 @@ static void MX_TIM3_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM3_Init 2 */
-
   /* USER CODE END TIM3_Init 2 */
   HAL_TIM_MspPostInit(&htim3);
 
@@ -552,13 +656,11 @@ static void MX_TIM6_Init(void)
 {
 
   /* USER CODE BEGIN TIM6_Init 0 */
-
   /* USER CODE END TIM6_Init 0 */
 
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
   /* USER CODE BEGIN TIM6_Init 1 */
-
   /* USER CODE END TIM6_Init 1 */
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 7999;
@@ -580,7 +682,6 @@ static void MX_TIM6_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM6_Init 2 */
-
   /* USER CODE END TIM6_Init 2 */
 
 }
@@ -594,13 +695,11 @@ static void MX_TIM7_Init(void)
 {
 
   /* USER CODE BEGIN TIM7_Init 0 */
-
   /* USER CODE END TIM7_Init 0 */
 
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
   /* USER CODE BEGIN TIM7_Init 1 */
-
   /* USER CODE END TIM7_Init 1 */
   htim7.Instance = TIM7;
   htim7.Init.Prescaler = 7999;
@@ -618,7 +717,6 @@ static void MX_TIM7_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM7_Init 2 */
-
   /* USER CODE END TIM7_Init 2 */
 
 }
@@ -632,11 +730,9 @@ static void MX_TIM16_Init(void)
 {
 
   /* USER CODE BEGIN TIM16_Init 0 */
-
   /* USER CODE END TIM16_Init 0 */
 
   /* USER CODE BEGIN TIM16_Init 1 */
-
   /* USER CODE END TIM16_Init 1 */
   htim16.Instance = TIM16;
   htim16.Init.Prescaler = 7999;
@@ -650,7 +746,6 @@ static void MX_TIM16_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM16_Init 2 */
-
   /* USER CODE END TIM16_Init 2 */
 
 }
@@ -664,11 +759,9 @@ static void MX_USART2_UART_Init(void)
 {
 
   /* USER CODE BEGIN USART2_Init 0 */
-
   /* USER CODE END USART2_Init 0 */
 
   /* USER CODE BEGIN USART2_Init 1 */
-
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
   huart2.Init.BaudRate = 115200;
@@ -745,12 +838,6 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(DHT_GPIO_Port, DHT_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
-
   /*Configure GPIO pin : BLUE_LED_Pin */
   GPIO_InitStruct.Pin = BLUE_LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -788,38 +875,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-//*************************************************** this is for the timer tasks exercise
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-    if (htim->Instance == TIM6)
-    {
-        Buzzer_DurationElapsed(buzzer);
-    }
-}
-
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart->Instance == USART2)
-    {
-        switch (rx_byte)
-        {
-            case '1': Buzzer_PlayNote(buzzer, NOTE_C1, 500); break;
-            case '2': Buzzer_PlayNote(buzzer, NOTE_D1, 500); break;
-            case '3': Buzzer_PlayNote(buzzer, NOTE_E1, 500); break;
-            case '4': Buzzer_PlayNote(buzzer, NOTE_F1, 500); break;
-            case '5': Buzzer_PlayNote(buzzer, NOTE_G1, 500); break;
-            case '6': Buzzer_PlayNote(buzzer, NOTE_A1, 500); break;
-            case '7': Buzzer_PlayNote(buzzer, NOTE_B1, 500); break;
-            case '8': Buzzer_PlayNote(buzzer, NOTE_C2, 500); break;
-            case '9': Buzzer_PlayNote(buzzer, NOTE_D2, 500); break;
-            default: break;
-        }
-
-        HAL_UART_Receive_IT(&huart2, &rx_byte, 1);  // re-arm for the NEXT byte
-    }
-}
 /* USER CODE END 4 */
 
 /**
@@ -833,8 +889,6 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
-
-
   }
   /* USER CODE END Error_Handler_Debug */
 }

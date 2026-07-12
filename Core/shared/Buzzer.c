@@ -135,7 +135,13 @@ void Buzzer_PlayWellerman(Buzzer_Handle *h)
         HAL_Delay(wellerman[i].duration_ms);
     }
 }
-
+//
+//put this in main
+//
+//HAL_TIM_Base_Start_IT(&htim6);   // duration timer (one-pulse mode)
+// buzzer = Buzzer_Create(&htim3, TIM_CHANNEL_1, &htim6);
+// Buzzer_PlayLittleYonatan(buzzer);
+// HAL_UART_Receive_IT(&huart2, &rx_byte, 1);   // start listening for 1 byte at a time
 
 
 
