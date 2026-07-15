@@ -18,12 +18,14 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "cmsis_os.h"
+#include "fatfs.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <stdarg.h> //for va_list var arg functions
 #include "basics.h"
 #include "../shared/Buzzer.h"
 #include "../shared/rtc_ds1307_I2C.h"
@@ -60,6 +62,8 @@ I2C_HandleTypeDef hi2c3;
 
 RTC_HandleTypeDef hrtc;
 
+SPI_HandleTypeDef hspi1;
+
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
@@ -70,61 +74,35 @@ TIM_HandleTypeDef htim16;
 UART_HandleTypeDef huart2;
 
 DMA_HandleTypeDef hdma_memtomem_dma1_channel1;
-/* Definitions for defaultTask */
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for DhtTask */
-osThreadId_t DhtTaskHandle;
-const osThreadAttr_t DhtTask_attributes = {
-  .name = "DhtTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityHigh,
-};
-/* Definitions for PrintTask */
-osThreadId_t PrintTaskHandle;
-const osThreadAttr_t PrintTask_attributes = {
-  .name = "PrintTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for DHTQueue */
-osMessageQueueId_t DHTQueueHandle;
-const osMessageQueueAttr_t DHTQueue_attributes = {
-  .name = " DHTQueue"
-};
 /* USER CODE BEGIN PV */
 
 Buzzer_Handle *buzzer = NULL;
 DateTime* g_dt = NULL;
 
-#define DHT_TASK    0x01   // bit 0
-#define PRINT_TASK  0x02   // bit 1
-#define FLAG_TASK3  0x04   // bit 2
-
-#define FLAG_DONE1  0x08
-#define FLAG_DONE2  0x10
-#define FLAG_DONE3  0x20
-
-#define SET_RTC_TIME    0   // set to 1 only when you want to (re)write the clock
-
-/* Notification IDs sent from ISRs to DhtTask, distinguishing the two sources */
-#define NOTIF_FROM_BUTTON  0x01u
-#define NOTIF_FROM_TIMER   0x02u
+//#define DHT_TASK    0x01   // bit 0
+//#define PRINT_TASK  0x02   // bit 1
+//#define FLAG_TASK3  0x04   // bit 2
+//
+//#define FLAG_DONE1  0x08
+//#define FLAG_DONE2  0x10
+//#define FLAG_DONE3  0x20
+//
+//#define SET_RTC_TIME    0   // set to 1 only when you want to (re)write the clock
+//
+///* Notification IDs sent from ISRs to DhtTask, distinguishing the two sources */
+//#define NOTIF_FROM_BUTTON  0x01u
+//#define NOTIF_FROM_TIMER   0x02u
 
 /* Queue message: what DhtTask sends to PrintTask */
-typedef enum { MSG_TEMPERATURE, MSG_HUMIDITY } DHT_MsgType_t;
+//typedef enum { MSG_TEMPERATURE, MSG_HUMIDITY } DHT_MsgType_t;
+//
+//typedef struct {
+//    DHT_MsgType_t type;
+//    uint8_t       int_part;
+//    uint8_t       dec_part;
+//} DHT_QueueMsg_t;
 
-typedef struct {
-    DHT_MsgType_t type;
-    uint8_t       int_part;
-    uint8_t       dec_part;
-} DHT_QueueMsg_t;
-
-static DHT_Handle *dht = NULL;
+//static DHT_Handle *dht = NULL;
 
 uint8_t rx_byte;
 
@@ -146,12 +124,9 @@ static void MX_ADC2_Init(void);
 static void MX_I2C3_Init(void);
 static void MX_RTC_Init(void);
 static void MX_TIM4_Init(void);
-void StartDefaultTask(void *argument);
-void StartDHT(void *argument);
-void StartPrint(void *argument);
-
+static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
-
+void SD_FatFs_Test(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -204,33 +179,19 @@ int main(void)
   MX_I2C3_Init();
   MX_RTC_Init();
   MX_TIM4_Init();
-
+  MX_SPI1_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
   /* TIM2: free-running 1us counter used by the DHT11 driver for bit timing.
      Non-interrupt start — we only ever poll its CNT register. */
-  HAL_TIM_Base_Start(&htim2);
-
-  /* TIM4: 5-second periodic interrupt that notifies DhtTask */
-  HAL_TIM_Base_Start_IT(&htim4);
-
-  dht = DHT_Create(DHT_GPIO_Port, DHT_Pin, &htim2);
-  if (dht == NULL)
-  {
-      printf("Failed to create DHT handle\r\n");
-      Error_Handler();
-  }
+//
 
 #if SET_RTC_TIME
   RTC_Time_t setTime = {.sec=0, .min=21, .hour=17, .dow=4, .date=8, .month=7, .year=26};
   RTC_SetTime(&hi2c3, &setTime);
 #endif
 
-  g_dt = DateTime_Create();
-     if (g_dt == NULL)
-     {
-         printf("Failed to allocate DateTime\r\n");
-         Error_Handler();
-     }
+  SD_FatFs_Test();
 
      // Set an initial time/date once (only needed the first time,
 //     // or whenever the backup domain loses power / gets reset)
@@ -239,54 +200,8 @@ int main(void)
 //     DateTime_WriteToRTC(g_dt);
 
 
-uint16_t c = 0;
+
   /* USER CODE END 2 */
-
-  /* Init scheduler */
-  osKernelInitialize();
-
-  /* USER CODE BEGIN RTOS_MUTEX */
-  /* add mutexes, ... */
-  /* USER CODE END RTOS_MUTEX */
-
-  /* USER CODE BEGIN RTOS_SEMAPHORES */
-  /* add semaphores, ... */
-  /* USER CODE END RTOS_SEMAPHORES */
-
-  /* USER CODE BEGIN RTOS_TIMERS */
-  /* start timers, add new ones, ... */
-  /* USER CODE END RTOS_TIMERS */
-
-  /* Create the queue(s) */
-  /* creation of DHTQueue */
-   DHTQueueHandle = osMessageQueueNew (10, sizeof(DHT_QueueMsg_t), & DHTQueue_attributes);
-
-  /* USER CODE BEGIN RTOS_QUEUES */
-  /* add queues, ... */
-  /* USER CODE END RTOS_QUEUES */
-
-  /* Create the thread(s) */
-  /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
-
-  /* creation of DhtTask */
-  DhtTaskHandle = osThreadNew(StartDHT, NULL, &DhtTask_attributes);
-
-  /* creation of PrintTask */
-  PrintTaskHandle = osThreadNew(StartPrint, NULL, &PrintTask_attributes);
-
-  /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
-  /* USER CODE END RTOS_THREADS */
-
-  /* USER CODE BEGIN RTOS_EVENTS */
-  /* add events, ... */
-  /* USER CODE END RTOS_EVENTS */
-
-  /* Start scheduler */
-  osKernelStart();
-
-  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -646,6 +561,46 @@ static void MX_RTC_Init(void)
 }
 
 /**
+  * @brief SPI1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI1_Init(void)
+{
+
+  /* USER CODE BEGIN SPI1_Init 0 */
+
+  /* USER CODE END SPI1_Init 0 */
+
+  /* USER CODE BEGIN SPI1_Init 1 */
+
+  /* USER CODE END SPI1_Init 1 */
+  /* SPI1 parameter configuration*/
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 7;
+  hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI1_Init 2 */
+
+  /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
   * @brief TIM2 Initialization Function
   * @param None
   * @retval None
@@ -971,20 +926,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(BLUE_LED_GPIO_Port, BLUE_LED_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(RGB_LED_GPIO_Port, RGB_LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(DHT_GPIO_Port, DHT_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin : BLUE_LED_Pin */
-  GPIO_InitStruct.Pin = BLUE_LED_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(BLUE_LED_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin : RGB_LED_Pin */
   GPIO_InitStruct.Pin = RGB_LED_Pin;
@@ -993,22 +938,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(RGB_LED_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : but1_Pin */
-  GPIO_InitStruct.Pin = but1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(but1_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : DHT_Pin */
-  GPIO_InitStruct.Pin = DHT_Pin;
+  /*Configure GPIO pin : SD_CS_Pin */
+  GPIO_InitStruct.Pin = SD_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(DHT_GPIO_Port, &GPIO_InitStruct);
-
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI3_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(SD_CS_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -1016,147 +951,56 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/* USER CODE BEGIN 4 */
 
-/* IMPORTANT: HAL_GPIO_EXTI_Callback and HAL_TIM_PeriodElapsedCallback are each
-   a single global weak symbol. Make sure NO other file (e.g. basics.c, or the
-   commented-out version left in dht2.c) also defines these — a duplicate
-   definition will fail to link, and if it somehow doesn't, only one of them
-   will ever actually run. */
-
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+void SD_FatFs_Test(void)
 {
-    if (htim->Instance == TIM4)
-    {
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        xTaskNotifyFromISR(DhtTaskHandle, NOTIF_FROM_TIMER,
-                            eSetValueWithOverwrite, &xHigherPriorityTaskWoken);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-    }
-}
+  static FATFS FatFs;
+  FIL fil;
+  UINT bytesWrote;
+  char line[64];
+  const char *msg = "hello world raz\r\n";
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    if (GPIO_Pin == but1_Pin)
-    {
-        /* GPIO is configured GPIO_MODE_IT_RISING_FALLING, so this callback
-           fires on BOTH press and release. We only want to notify on press.
-           VERIFY against your actual button wiring: this assumes the Nucleo
-           user button idles LOW and reads HIGH when pressed (typical B1
-           wiring with an external pull-down). If your button is wired the
-           opposite way, flip this to GPIO_PIN_RESET. */
-        if (HAL_GPIO_ReadPin(but1_GPIO_Port, but1_Pin) == GPIO_PIN_SET)
-        {
-            BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-            xTaskNotifyFromISR(DhtTaskHandle, NOTIF_FROM_BUTTON,
-                                eSetValueWithOverwrite, &xHigherPriorityTaskWoken);
-            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-        }
-        /* release edge: ignored */
-    }
+  HAL_Delay(1000);
+
+  FRESULT fres = f_mount(&FatFs, "", 1);
+  if (fres != FR_OK) {
+    printf("SD mount failed (%i)\r\n", fres);
+    return;
+  }
+
+  if (f_open(&fil, "hello.txt", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
+    printf("SD open failed\r\n");
+    f_mount(NULL, "", 0);
+    return;
+  }
+
+  fres = f_write(&fil, msg, strlen(msg), &bytesWrote);
+  f_close(&fil);
+  if (fres != FR_OK) {
+    printf("SD write failed (%i)\r\n", fres);
+    f_mount(NULL, "", 0);
+    return;
+  }
+  printf("Wrote %u bytes\r\n", bytesWrote);
+
+  if (f_open(&fil, "hello.txt", FA_READ) != FR_OK) {
+    printf("SD read-open failed\r\n");
+    f_mount(NULL, "", 0);
+    return;
+  }
+
+  while (f_gets(line, sizeof(line), &fil)) {
+    printf("%s", line);
+  }
+
+  f_close(&fil);
+  f_mount(NULL, "", 0);
+
+  printf("SD test complete\r\n");
 }
 
 /* USER CODE END 4 */
-
-/* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
-{
-  /* USER CODE BEGIN 5 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartDHT */
-/**
-* @brief Function implementing the DhtTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartDHT */
-void StartDHT(void *argument)
-{
-  /* USER CODE BEGIN StartDHT */
-  uint32_t notifValue;
-  DHT_Data lastReading;
-  DHT_QueueMsg_t msg;
-
-  /* Infinite loop */
-  for(;;)
-  {
-    /* Block until either the button or the 5-second timer notifies us.
-       eSetValueWithOverwrite in the ISR means this always reads the most
-       recent single notification, which is what lets us tell the two
-       sources apart via NOTIF_FROM_BUTTON / NOTIF_FROM_TIMER. */
-    xTaskNotifyWait(0x00, ULONG_MAX, &notifValue, portMAX_DELAY);
-
-    if (DHT_Read(dht, &lastReading) != DHT_OK)
-    {
-        /* Bad checksum or no response from the sensor this cycle —
-           drop it and wait for the next notification rather than
-           pushing garbage data to PrintTask. */
-        continue;
-    }
-
-    if (notifValue == NOTIF_FROM_BUTTON)
-    {
-        msg.type     = MSG_TEMPERATURE;
-        msg.int_part = lastReading.temperature_int;
-        msg.dec_part = lastReading.temperature_dec;
-    }
-    else if (notifValue == NOTIF_FROM_TIMER)
-    {
-        msg.type     = MSG_HUMIDITY;
-        msg.int_part = lastReading.humidity_int;
-        msg.dec_part = lastReading.humidity_dec;
-    }
-    else
-    {
-        continue;
-    }
-
-    osMessageQueuePut(DHTQueueHandle, &msg, 0, 0);
-  }
-  /* USER CODE END StartDHT */
-}
-
-/* USER CODE BEGIN Header_StartPrint */
-/**
-* @brief Function implementing the PrintTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartPrint */
-void StartPrint(void *argument)
-{
-  /* USER CODE BEGIN StartPrint */
-  DHT_QueueMsg_t msg;
-
-  /* Infinite loop */
-  for(;;)
-  {
-    if (osMessageQueueGet(DHTQueueHandle, &msg, NULL, osWaitForever) == osOK)
-    {
-        if (msg.type == MSG_TEMPERATURE)
-        {
-            printf("Temperature: %u.%u C\r\n", msg.int_part, msg.dec_part);
-        }
-        else
-        {
-            printf("Humidity: %u.%u %%\r\n", msg.int_part, msg.dec_part);
-        }
-    }
-  }
-  /* USER CODE END StartPrint */
-}
 
 /**
   * @brief  This function is executed in case of error occurrence.
