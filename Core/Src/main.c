@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 #include "fatfs.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -31,6 +32,7 @@
 #include "../shared/rtc_ds1307_I2C.h"
 #include "../shared/datetime.h"
 #include "../shared/dht2.h"
+#include "../shared/sdfatfs.h"
 
 //#include "../shared/uart_queue.h"
 //#include "../shared/TimerTasks.h"
@@ -66,7 +68,6 @@ SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
-TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim6;
 TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim16;
@@ -74,6 +75,32 @@ TIM_HandleTypeDef htim16;
 UART_HandleTypeDef huart2;
 
 DMA_HandleTypeDef hdma_memtomem_dma1_channel1;
+/* Definitions for defaultTask */
+osThreadId_t defaultTaskHandle;
+const osThreadAttr_t defaultTask_attributes = {
+  .name = "defaultTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for DHTask */
+osThreadId_t DHTaskHandle;
+const osThreadAttr_t DHTask_attributes = {
+  .name = "DHTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityHigh,
+};
+/* Definitions for saveTask */
+osThreadId_t saveTaskHandle;
+const osThreadAttr_t saveTask_attributes = {
+  .name = "saveTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for myQueue01 */
+osMessageQueueId_t myQueue01Handle;
+const osMessageQueueAttr_t myQueue01_attributes = {
+  .name = "myQueue01"
+};
 /* USER CODE BEGIN PV */
 
 Buzzer_Handle *buzzer = NULL;
@@ -94,15 +121,18 @@ DateTime* g_dt = NULL;
 //#define NOTIF_FROM_TIMER   0x02u
 
 /* Queue message: what DhtTask sends to PrintTask */
-//typedef enum { MSG_TEMPERATURE, MSG_HUMIDITY } DHT_MsgType_t;
+typedef enum { MSG_TEMPERATURE, MSG_HUMIDITY } DHT_MsgType_t;
 //
-//typedef struct {
-//    DHT_MsgType_t type;
-//    uint8_t       int_part;
-//    uint8_t       dec_part;
-//} DHT_QueueMsg_t;
+typedef struct {
+    DHT_MsgType_t type;
+    uint8_t       int_part;
+    uint8_t       dec_part;
+} DHT_QueueMsg_t;
 
-//static DHT_Handle *dht = NULL;
+
+static DHT_Handle *dht = NULL;
+DHT_Data dht_data = {0};
+
 
 uint8_t rx_byte;
 
@@ -123,8 +153,11 @@ static void MX_ADC1_Init(void);
 static void MX_ADC2_Init(void);
 static void MX_I2C3_Init(void);
 static void MX_RTC_Init(void);
-static void MX_TIM4_Init(void);
 static void MX_SPI1_Init(void);
+void StartDefaultTask(void *argument);
+void StartDHT(void *argument);
+void StartSave(void *argument);
+
 /* USER CODE BEGIN PFP */
 void SD_FatFs_Test(void);
 /* USER CODE END PFP */
@@ -178,20 +211,19 @@ int main(void)
   MX_ADC2_Init();
   MX_I2C3_Init();
   MX_RTC_Init();
-  MX_TIM4_Init();
   MX_SPI1_Init();
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
   /* TIM2: free-running 1us counter used by the DHT11 driver for bit timing.
      Non-interrupt start — we only ever poll its CNT register. */
-//
+  HAL_TIM_Base_Start(&htim2);
 
 #if SET_RTC_TIME
   RTC_Time_t setTime = {.sec=0, .min=21, .hour=17, .dow=4, .date=8, .month=7, .year=26};
   RTC_SetTime(&hi2c3, &setTime);
 #endif
 
-  SD_FatFs_Test();
+//  SD_FatFs_Test();
 
      // Set an initial time/date once (only needed the first time,
 //     // or whenever the backup domain loses power / gets reset)
@@ -202,6 +234,52 @@ int main(void)
 
 
   /* USER CODE END 2 */
+
+  /* Init scheduler */
+  osKernelInitialize();
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+//  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+//  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+//  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* Create the queue(s) */
+  /* creation of myQueue01 */
+  myQueue01Handle = osMessageQueueNew (16, sizeof(uint16_t), &myQueue01_attributes);
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+//  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of defaultTask */
+  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+
+  /* creation of DHTask */
+  DHTaskHandle = osThreadNew(StartDHT, NULL, &DHTask_attributes);
+
+  /* creation of saveTask */
+  saveTaskHandle = osThreadNew(StartSave, NULL, &saveTask_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+//  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+//  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -699,51 +777,6 @@ static void MX_TIM3_Init(void)
 }
 
 /**
-  * @brief TIM4 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM4_Init(void)
-{
-
-  /* USER CODE BEGIN TIM4_Init 0 */
-
-  /* USER CODE END TIM4_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM4_Init 1 */
-
-  /* USER CODE END TIM4_Init 1 */
-  htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 7999;
-  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = 49999;
-  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM4_Init 2 */
-
-  /* USER CODE END TIM4_Init 2 */
-
-}
-
-/**
   * @brief TIM6 Initialization Function
   * @param None
   * @retval None
@@ -938,6 +971,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(RGB_LED_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : DHT_Pin */
+  GPIO_InitStruct.Pin = DHT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(DHT_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pin : SD_CS_Pin */
   GPIO_InitStruct.Pin = SD_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -1000,7 +1039,153 @@ void SD_FatFs_Test(void)
   printf("SD test complete\r\n");
 }
 
+
+#include <string.h>
+#include "stm32l4xx_hal.h"
+
+#define FLASH_USER_ADDR   0x080FF800U   // last 2KB page of 1MB flash on STM32L476RG
+
+void Flash_WriteString(uint32_t address, char *str)
+{
+    // Step 1: Unlock flash — it's write-protected by default.
+    // HAL_FLASH_Unlock() handles the internal key-sequence for you.
+    HAL_FLASH_Unlock();
+
+    // Step 2: Erase the page first.
+    // Flash can only flip bits 1->0 when programming. To get back to a
+    // clean slate (all 1s) you must erase the whole page beforehand.
+    FLASH_EraseInitTypeDef EraseInitStruct;
+    uint32_t PageError = 0;
+
+    EraseInitStruct.TypeErase = FLASH_TYPEERASE_PAGES;
+    EraseInitStruct.Banks     = FLASH_BANK_2;   // last page falls in bank 2 on a 1MB part
+    EraseInitStruct.Page      = 255;            // page index within that bank
+    EraseInitStruct.NbPages   = 1;
+
+    if (HAL_FLASHEx_Erase(&EraseInitStruct, &PageError) != HAL_OK)
+    {
+        HAL_FLASH_Lock();
+        Error_Handler();   // PageError tells you which page failed, if nonzero
+    }
+
+    // Step 3: Program the string, 8 bytes (one "double word") at a time.
+    // The L4 flash peripheral only accepts writes in 8-byte chunks.
+    int len = strlen(str) + 1;   // +1 to include the null terminator '\0'
+    uint32_t addr = address;
+
+    // Outer loop: picks which group of 8 bytes we're on, and which
+    // flash address that group goes to.
+    for (int i = 0; i < len; i += 8)
+    {
+        // A union: u.bytes and u.dword are the SAME 8 bytes of memory,
+        // just viewed two different ways. Writing to u.bytes[j] also
+        // changes u.dword — no copying needed.
+        union {
+            uint64_t dword;
+            uint8_t  bytes[8];
+        } u;
+
+        // Reset to "erased" value (all 1 bits) before filling this group.
+        // Anything we don't overwrite below stays as 0xFF.
+        u.dword = 0xFFFFFFFFFFFFFFFF;
+
+        // Inner loop: fills this one group's 8 slots (or fewer, if the
+        // string runs out first).
+        for (int j = 0; j < 8 && (i + j) < len; j++)
+        {
+            u.bytes[j] = str[i + j];
+        }
+
+        // Ship this group of 8 bytes to flash as one 64-bit write.
+        HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, addr, u.dword);
+
+        // Move to the next 8-byte address for the next group.
+        addr += 8;
+    }
+
+    // Step 4: Re-lock flash so nothing else can accidentally write to it.
+    HAL_FLASH_Lock();
+}
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void *argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_StartDHT */
+/**
+* @brief Function implementing the DHTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartDHT */
+void StartDHT(void *argument)
+{
+  /* USER CODE BEGIN StartDHT */
+	dht = DHT_Create(DHT_GPIO_Port,DHT_Pin,&htim2);
+			if (!dht) {
+				printf("dht == null");
+			}
+			DHT_Result result;
+  /* Infinite loop */
+  for(;;)
+  {
+	  		 DHT_Result result = DHT_Read(dht, &dht_data);
+	  		if (result == DHT_NO_RESPONSE){
+	  		        printf("DHT: No response\r\n");}
+	  		    else if (result == DHT_CHECKSUM_ERROR){
+	  		        printf("DHT: Checksum error\r\n");}
+	  		    else
+	  		        {printf("DHT: Read OK\r\n");}
+	  		osMessageQueuePut(myQueue01Handle, &dht_data, 0, osWaitForever);
+
+    osDelay(3000);
+  }
+  /* USER CODE END StartDHT */
+}
+
+/* USER CODE BEGIN Header_StartSave */
+/**
+* @brief Function implementing the saveTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartSave */
+void StartSave(void *argument)
+{
+  /* USER CODE BEGIN StartSave */
+  DHT_Data received;
+  char line[64];
+
+  /* Infinite loop */
+  for(;;)
+  {
+    if (osMessageQueueGet(myQueue01Handle, &received, NULL, osWaitForever) == osOK)
+    {
+      snprintf(line, sizeof(line), "T:%u.%u H:%u.%u\r\n",
+               received.temperature_int, received.temperature_dec,
+               received.humidity_int, received.humidity_dec);
+
+      SDFatFS_SaveString("dht_log.txt", line);
+      SDFatFS_PrintFile("dht_log.txt");
+    }
+  }
+  /* USER CODE END StartSave */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.

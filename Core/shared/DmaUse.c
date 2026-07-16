@@ -1,3 +1,24 @@
+/*
+ * TOPIC: DMA Memory-to-Memory Transfer vs. CPU memcpy — Benchmark
+ *
+ * DMA (Direct Memory Access) lets the hardware copy blocks of memory
+ * independently, freeing the CPU to do other work (or sleep) during the
+ * transfer. This example benchmarks two full DMA transfers against a standard
+ * CPU memcpy() on an 8000-element uint32_t array (32 KB).
+ *
+ * TIM2 is used as a free-running microsecond counter for timing.
+ * The result is printed: "DMA was faster by X us" (or vice versa).
+ *
+ * KEY APIS:
+ *   HAL_DMA_Start(handle, src, dst, length)           — start transfer (blocking poll style)
+ *   HAL_DMA_PollForTransfer(handle, type, timeout)    — wait for completion
+ *   __HAL_TIM_SET_COUNTER / __HAL_TIM_GET_COUNTER     — reset / read TIM2 tick count
+ *
+ * In main(), before the while(1):
+ *   HAL_TIM_Base_Start(&htim2);   — start microsecond counter
+ *   dma_task();                   — run the benchmark
+ */
+
 //#define BUFFER_SIZE 8000
 //static uint32_t src[BUFFER_SIZE];
 //static uint32_t dst[BUFFER_SIZE];

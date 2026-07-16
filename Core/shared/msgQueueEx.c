@@ -1,3 +1,25 @@
+/*
+ * TOPIC: FreeRTOS Message Queue — Passing Data Between Tasks
+ *
+ * A message queue lets tasks send typed values (not just signals) to each
+ * other in a thread-safe, buffered way. The queue holds up to N items;
+ * the sender blocks if full, the receiver blocks if empty.
+ *
+ * Flow:
+ *   UARTThread  ──reads number from terminal──► osMessageQueuePut(msgQueueID, &delay, ...)
+ *   blinkThread ──osMessageQueueGet(msgQueueID, &msg, ...)──► uses value as LED delay
+ *
+ * In main(), after osKernelInitialize():
+ *   msgQueueID = osMessageQueueNew(5, sizeof(int16_t), NULL);
+ *
+ * KEY APIS:
+ *   osMessageQueueNew(count, msgSize, attr)             — create queue (count = max items)
+ *   osMessageQueuePut(handle, &msg, priority, timeout)  — enqueue; blocks if full
+ *   osMessageQueueGet(handle, &msg, &priority, timeout) — dequeue; blocks if empty
+ *
+ * NOTE: Both tasks must agree on the message type (uint16_t here for ms delay).
+ */
+
 //#include "cmsis_os.h"
 //#include <stdio.h>
 //

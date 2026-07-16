@@ -75,6 +75,8 @@ void Error_Handler(void);
 #define TCK_GPIO_Port GPIOA
 #define BUZZER_Pin GPIO_PIN_4
 #define BUZZER_GPIO_Port GPIOB
+#define DHT_Pin GPIO_PIN_5
+#define DHT_GPIO_Port GPIOB
 #define SD_CS_Pin GPIO_PIN_6
 #define SD_CS_GPIO_Port GPIOB
 
